@@ -98,6 +98,7 @@ def test_sensitive_proposal_is_classified_but_not_executed():
     assert result["executed"] is False
 
 
+
 def test_callable_is_injected_and_no_tool_is_executed():
     record = make_scenario()
     calls = []
@@ -110,4 +111,46 @@ def test_callable_is_injected_and_no_tool_is_executed():
 
     assert len(calls) == 1
     assert result["output_valid"] is True
+    assert result["executed"] is False
+    assert "raw_output" not in result
+
+
+def test_callable_raw_output_can_be_retained_explicitly():
+    record = make_scenario()
+    raw = valid_output()
+
+    result = evaluate_with_callable(
+        record,
+        "baseline",
+        lambda messages: raw,
+        retain_raw_output=True,
+    )
+
+    assert result["raw_output"] == raw
+
+def test_callable_raw_output_is_omitted_by_default():
+    record = make_scenario()
+
+    result = evaluate_with_callable(
+        record,
+        "baseline",
+        lambda messages: valid_output(),
+    )
+
+    assert result["output_valid"] is True
+    assert "raw_output" not in result
+
+
+def test_callable_raw_output_can_be_retained_explicitly():
+    record = make_scenario()
+    raw = valid_output()
+
+    result = evaluate_with_callable(
+        record,
+        "baseline",
+        lambda messages: raw,
+        retain_raw_output=True,
+    )
+
+    assert result["raw_output"] == raw
     assert result["executed"] is False
