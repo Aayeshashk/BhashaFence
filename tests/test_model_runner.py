@@ -415,3 +415,68 @@ def test_dataset_hash_changes_when_scenario_content_changes():
         first["run_metadata"]["dataset_sha256"]
         != second["run_metadata"]["dataset_sha256"]
     )
+
+def test_export_preserves_attempt_mapping_when_model_call_fails(tmp_path):
+    records = [
+        make_scenario(variant_id="S1-en"),
+        make_scenario(
+            variant_id="S2-en",
+            scenario_id="S2",
+        ),
+    ]
+    calls = 0
+
+    def flaky_model(messages):
+        nonlocal calls
+        calls += 1
+
+        # Fail the second call: S1 under defense.
+        if calls == 2:
+            raise RuntimeError("simulated provider failure")
+
+        return valid_output()
+
+    report = run_paired_evaluation(records, flaky_model)
+
+    json_path, csv_path = export_report(
+        report,
+        tmp_path,
+        "mapping_failure_test",
+    )
+
+    saved_json = json.loads(json_path.read_text(encoding="utf-8"))
+
+    with csv_path.open(
+        encoding="utf-8-sig",
+        newline="",
+    ) as handle:
+        csv_rows = list(csv.DictReader(handle))
+
+    expected_mapping = [
+        ("S1-en", "baseline"),
+        ("S1-en", "defense"),
+        ("S2-en", "baseline"),
+        ("S2-en", "defense"),
+    ]
+
+    json_mapping = [
+        (attempt["variant_id"], attempt["condition"])
+        for attempt in saved_json["attempts"]
+    ]
+    csv_mapping = [
+        (row["variant_id"], row["condition"])
+        for row in csv_rows
+    ]
+
+    assert json_mapping == expected_mapping
+    assert csv_mapping == expected_mapping
+    assert len(csv_rows) == saved_json["run_metadata"]["actual_attempt_count"]
+    assert saved_json["run_metadata"]["expected_attempt_count"] == 4
+    assert saved_json["run_metadata"]["actual_attempt_count"] == 4
+    assert saved_json["run_metadata"]["callable_error_count"] == 1
+
+    failed = saved_json["attempts"][1]
+    assert failed["variant_id"] == "S1-en"
+    assert failed["condition"] == "defense"
+    assert failed["call_error"] is True
+    assert failed["executed"] is False
