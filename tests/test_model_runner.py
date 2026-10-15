@@ -1,4 +1,4 @@
-
+from pathlib import Path
 import csv
 import json
 
@@ -490,3 +490,65 @@ def test_export_rejects_non_json_serializable_report(tmp_path):
         export_report(report, tmp_path, "invalid_report")
 
     assert not (tmp_path / "invalid_report.json").exists()
+
+
+
+def test_export_removes_partial_json_if_csv_export_fails(
+    tmp_path,
+    monkeypatch,
+):
+    report = run_paired_evaluation(
+        [make_scenario()],
+        lambda messages: valid_output(),
+    )
+
+    original_open = Path.open
+
+    def failing_csv_open(self, *args, **kwargs):
+        if self.name.endswith(".csv.tmp"):
+            raise OSError("simulated CSV write failure")
+        return original_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", failing_csv_open)
+
+    with pytest.raises(OSError, match="simulated CSV write failure"):
+        export_report(report, tmp_path, "partial_export")
+
+    assert not (tmp_path / "partial_export.json").exists()
+    assert not (tmp_path / "partial_export.csv").exists()
+    assert not (tmp_path / ".partial_export.json.tmp").exists()
+    assert not (tmp_path / ".partial_export.csv.tmp").exists()
+
+def test_export_failure_preserves_previous_successful_report(
+    tmp_path,
+    monkeypatch,
+):
+    report = run_paired_evaluation(
+        [make_scenario()],
+        lambda messages: valid_output(),
+    )
+
+    json_path, csv_path = export_report(
+        report,
+        tmp_path,
+        "preserve_existing",
+    )
+
+    original_json = json_path.read_bytes()
+    original_csv = csv_path.read_bytes()
+    original_open = Path.open
+
+    def failing_csv_open(self, *args, **kwargs):
+        if self.name.endswith(".csv.tmp"):
+            raise OSError("simulated CSV write failure")
+        return original_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", failing_csv_open)
+
+    with pytest.raises(OSError, match="simulated CSV write failure"):
+        export_report(report, tmp_path, "preserve_existing")
+
+    assert json_path.read_bytes() == original_json
+    assert csv_path.read_bytes() == original_csv
+    assert not (tmp_path / ".preserve_existing.json.tmp").exists()
+    assert not (tmp_path / ".preserve_existing.csv.tmp").exists()

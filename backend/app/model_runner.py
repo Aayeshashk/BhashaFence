@@ -195,23 +195,24 @@ def run_paired_evaluation(
     }
 
 
+
+
 def export_report(
     report: dict[str, Any],
     output_dir: str | Path,
     run_name: str = "paired_evaluation",
 ) -> tuple[Path, Path]:
-    """Write a JSON report and a CSV of attempts."""
+    """Write a JSON report and CSV without losing previous exports on failure."""
     safe_name = _safe_run_name(run_name)
     destination = Path(output_dir)
     destination.mkdir(parents=True, exist_ok=True)
 
     json_path = destination / f"{safe_name}.json"
     csv_path = destination / f"{safe_name}.csv"
-
-    json_path.write_text(
-        json.dumps(report, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    json_temp = destination / f".{safe_name}.json.tmp"
+    csv_temp = destination / f".{safe_name}.csv.tmp"
+    json_backup = destination / f".{safe_name}.json.bak"
+    csv_backup = destination / f".{safe_name}.csv.bak"
 
     columns = [
         "variant_id",
@@ -231,17 +232,70 @@ def export_report(
         "raw_output",
     ]
 
-    with csv_path.open(
-        "w",
-        newline="",
-        encoding="utf-8-sig",
-    ) as handle:
-        writer = csv.DictWriter(
-            handle,
-            fieldnames=columns,
-            extrasaction="ignore",
+    paths = (
+        json_temp,
+        csv_temp,
+        json_backup,
+        csv_backup,
+    )
+
+    try:
+        # Prepare both new files before touching existing reports.
+        json_temp.write_text(
+            json.dumps(
+                report,
+                ensure_ascii=False,
+                indent=2,
+                allow_nan=False,
+            ),
+            encoding="utf-8",
         )
-        writer.writeheader()
-        writer.writerows(report.get("attempts", []))
+
+        with csv_temp.open(
+            "w",
+            newline="",
+            encoding="utf-8-sig",
+        ) as handle:
+            writer = csv.DictWriter(
+                handle,
+                fieldnames=columns,
+                extrasaction="ignore",
+            )
+            writer.writeheader()
+            writer.writerows(report.get("attempts", []))
+
+        # Back up existing reports so failures can restore them.
+        if json_path.exists():
+            json_path.replace(json_backup)
+        if csv_path.exists():
+            csv_path.replace(csv_backup)
+
+        try:
+            json_temp.replace(json_path)
+            csv_temp.replace(csv_path)
+        except Exception:
+            # Remove any newly published files.
+            json_path.unlink(missing_ok=True)
+            csv_path.unlink(missing_ok=True)
+
+            # Restore previous successful files.
+            if json_backup.exists():
+                json_backup.replace(json_path)
+            if csv_backup.exists():
+                csv_backup.replace(csv_path)
+            raise
+
+        # Publishing succeeded; remove old backups.
+        json_backup.unlink(missing_ok=True)
+        csv_backup.unlink(missing_ok=True)
+
+    except Exception:
+        # Clean up temporary files without deleting existing final reports.
+        for path in paths:
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                pass
+        raise
 
     return json_path, csv_path
