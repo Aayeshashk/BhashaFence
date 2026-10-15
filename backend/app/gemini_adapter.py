@@ -12,7 +12,7 @@ from typing import Any, Callable
 from backend.app.model_evaluation import build_messages
 
 
-DEFAULT_MODEL = "gemini-2.5-flash"
+DEFAULT_MODEL = "gemini-3.1-flash-lite"
 MAX_OUTPUT_TOKENS = 1024
 
 
