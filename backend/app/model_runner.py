@@ -32,6 +32,21 @@ def sha256_file(path: str | Path) -> str:
     return digest.hexdigest()
 
 
+def sha256_records(records: list[dict[str, Any]]) -> str:
+    """Return a deterministic SHA-256 digest of scenario records."""
+    canonical_json = json.dumps(
+        records,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    )
+
+    return hashlib.sha256(
+        canonical_json.encode("utf-8")
+    ).hexdigest()
+
+
 def _safe_run_name(run_name: str) -> str:
     """Reject unsafe report names."""
     if not isinstance(run_name, str) or not re.fullmatch(
@@ -55,29 +70,19 @@ def run_paired_evaluation(
 ) -> dict[str, Any]:
     """Evaluate each valid scenario under baseline and defense conditions."""
 
-    # Validate metadata before starting the evaluation.
+    # Validate basic metadata before starting the evaluation.
     if not isinstance(model_id, str) or not model_id.strip():
         raise ValueError("model_id must be a non-empty string.")
 
-    if dataset_sha256 is not None and (
-        not isinstance(dataset_sha256, str)
-        or not re.fullmatch(r"[0-9a-fA-F]{64}", dataset_sha256)
-    ):
-        raise ValueError(
-            "dataset_sha256 must be a 64-character SHA-256 hex digest."
-        )
-
     if model_config is not None:
         try:
-            json.dumps(model_config)
+            json.dumps(model_config, allow_nan=False)
         except (TypeError, ValueError) as exc:
             raise ValueError(
                 "model_config must be JSON serializable."
             ) from exc
 
-    # Validate the complete dataset before calling the model.
-    # This prevents malformed scenarios and duplicate variant IDs from
-    # entering the experiment.
+    # Validate the complete dataset before hashing or calling the model.
     validation_errors = validate_scenarios(records)
 
     if validation_errors:
@@ -85,6 +90,27 @@ def run_paired_evaluation(
             "Invalid scenario records: "
             + "; ".join(validation_errors)
         )
+
+    # Hash the exact ordered records that will be evaluated.
+    computed_dataset_sha256 = sha256_records(records)
+
+    # A caller-provided hash must identify these exact records.
+    if dataset_sha256 is not None:
+        if (
+            not isinstance(dataset_sha256, str)
+            or not re.fullmatch(r"[0-9a-fA-F]{64}", dataset_sha256)
+        ):
+            raise ValueError(
+                "dataset_sha256 must be a 64-character SHA-256 hex digest."
+            )
+
+        if dataset_sha256.lower() != computed_dataset_sha256:
+            raise ValueError(
+                "dataset_sha256 does not match the supplied scenario records."
+            )
+
+    # Always record the hash computed from the evaluated records.
+    dataset_sha256 = computed_dataset_sha256
 
     attempts: list[dict[str, Any]] = []
     callable_errors = 0

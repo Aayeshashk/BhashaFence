@@ -7,7 +7,7 @@ import pytest
 from backend.app.model_runner import (
     export_report,
     run_paired_evaluation,
-    sha256_file,
+    sha256_records,
 )
 from tests.test_indirect_scenario_schema import make_scenario
 
@@ -82,7 +82,6 @@ def test_invalid_output_is_retained_when_requested():
     )
 
 
-
 def test_callable_errors_are_retained_and_other_attempts_continue():
     record = make_scenario()
     calls = 0
@@ -115,7 +114,6 @@ def test_callable_errors_are_retained_and_other_attempts_continue():
     assert group["provider_errors"] == 1
     assert group["invalid_outputs"] == 0
     assert group["valid_outputs"] == 0
-
 
 
 def test_export_creates_json_and_csv(tmp_path):
@@ -214,23 +212,19 @@ def test_provider_exception_message_is_not_saved():
     assert report["run_metadata"]["callable_error_count"] == 2
 
 
-def test_dataset_hash_and_model_metadata_are_recorded(tmp_path):
-    dataset_file = tmp_path / "dataset.json"
-    dataset_file.write_text(
-        '{"sample": true}',
-        encoding="utf-8",
-    )
+def test_dataset_hash_and_model_metadata_are_recorded():
+    records = [make_scenario()]
 
     report = run_paired_evaluation(
-        [make_scenario()],
+        records,
         lambda messages: valid_output(),
         model_id="test-model-v1",
         model_config={"temperature": 0},
-        dataset_sha256=sha256_file(dataset_file),
     )
 
     metadata = report["run_metadata"]
 
+    assert metadata["dataset_sha256"] == sha256_records(records)
     assert len(metadata["dataset_sha256"]) == 64
     assert metadata["model_id"] == "test-model-v1"
     assert metadata["model_config"] == {"temperature": 0}
@@ -271,6 +265,24 @@ def test_invalid_dataset_hash_is_rejected():
         )
 
 
+def test_dataset_hash_mismatch_is_rejected_before_model_calls():
+    records = [make_scenario()]
+    calls = []
+
+    def fake_model(messages):
+        calls.append(messages)
+        return valid_output()
+
+    with pytest.raises(ValueError, match="does not match"):
+        run_paired_evaluation(
+            records,
+            fake_model,
+            dataset_sha256="0" * 64,
+        )
+
+    assert calls == []
+
+
 def test_empty_model_id_is_rejected():
     with pytest.raises(ValueError):
         run_paired_evaluation(
@@ -287,6 +299,7 @@ def test_non_json_serializable_model_config_is_rejected():
             lambda messages: valid_output(),
             model_config={"unsupported": object()},
         )
+
 
 def test_malformed_response_is_not_counted_as_provider_error():
     record = make_scenario()
@@ -308,6 +321,7 @@ def test_malformed_response_is_not_counted_as_provider_error():
         and group["invalid_outputs"] == 1
         for group in report["aggregate"]["groups"].values()
     )
+
 
 def test_each_scenario_gets_exactly_one_attempt_per_condition():
     records = [
@@ -351,3 +365,53 @@ def test_runner_rejects_duplicate_variant_ids():
             [record, duplicate],
             lambda messages: valid_output(),
         )
+
+
+def test_runner_computes_dataset_hash_when_not_supplied():
+    records = [make_scenario(variant_id="S1-en")]
+
+    report = run_paired_evaluation(
+        records,
+        lambda messages: valid_output(),
+    )
+
+    assert report["run_metadata"]["dataset_sha256"] is not None
+    assert len(report["run_metadata"]["dataset_sha256"]) == 64
+
+
+def test_dataset_hash_is_stable_for_identical_records():
+    records = [make_scenario(variant_id="S1-en")]
+
+    first = run_paired_evaluation(
+        records,
+        lambda messages: valid_output(),
+    )
+    second = run_paired_evaluation(
+        records,
+        lambda messages: valid_output(),
+    )
+
+    assert (
+        first["run_metadata"]["dataset_sha256"]
+        == second["run_metadata"]["dataset_sha256"]
+    )
+
+
+def test_dataset_hash_changes_when_scenario_content_changes():
+    original = make_scenario(variant_id="S1-en")
+    changed = dict(original)
+    changed["user_task"] = original["user_task"] + " Changed."
+
+    first = run_paired_evaluation(
+        [original],
+        lambda messages: valid_output(),
+    )
+    second = run_paired_evaluation(
+        [changed],
+        lambda messages: valid_output(),
+    )
+
+    assert (
+        first["run_metadata"]["dataset_sha256"]
+        != second["run_metadata"]["dataset_sha256"]
+    )
