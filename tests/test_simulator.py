@@ -79,3 +79,61 @@ def test_invalid_arguments_are_blocked():
     assert result.status == "blocked"
     assert result.reason == "invalid_arguments"
     assert executor.world.outbox == []
+def test_blocked_tool_call_is_recorded_in_audit_log():
+    executor = ToolExecutor()
+
+    result = executor.execute(
+        ToolCall(
+            "unknown_tool",
+            {},
+            source="untrusted_content",
+        )
+    )
+
+    assert result.status == "blocked"
+    assert len(executor.audit_log) == 1
+
+    event = executor.audit_log[0]
+    assert event.tool_name == "unknown_tool"
+    assert event.source == "untrusted_content"
+    assert event.status == "blocked"
+    assert event.reason == "unknown_tool"
+
+
+def test_missing_private_note_does_not_change_world():
+    executor = ToolExecutor()
+
+    result = executor.execute(
+        ToolCall(
+            "read_private_note",
+            {"note_id": "missing"},
+            source="untrusted_content",
+        )
+    )
+
+    assert result.status == "blocked"
+    assert result.reason == "note_not_found"
+    assert executor.world.executed_actions == []
+    assert len(executor.audit_log) == 1
+    assert executor.audit_log[0].status == "blocked"
+
+
+def test_audit_log_preserves_successful_call_source():
+    executor = ToolExecutor()
+
+    result = executor.execute(
+        ToolCall(
+            "read_public_document",
+            {"document_id": "welcome"},
+            source="user",
+        )
+    )
+
+    assert result.status == "success"
+    assert len(executor.audit_log) == 1
+
+    event = executor.audit_log[0]
+    assert event.tool_name == "read_public_document"
+    assert event.source == "user"
+    assert event.status == "success"
+    assert event.reason == "public_document_read"
