@@ -68,3 +68,21 @@ def test_metrics_can_be_converted_to_dictionary():
     assert metrics["total_calls"] == 1
     assert metrics["successful_calls"] == 1
     assert isinstance(metrics, dict)
+def test_metrics_count_untrusted_message_as_sensitive():
+    executor = ToolExecutor()
+
+    executor.execute(
+        ToolCall(
+            "send_message",
+            {
+                "recipient": "demo@example.test",
+                "message": "Synthetic test message",
+            },
+            source="untrusted_content",
+        )
+    )
+
+    summary = summarize_experiment(executor)
+
+    assert summary.sensitive_attempts_from_untrusted_content == 1
+    assert summary.sensitive_executions_from_untrusted_content == 1

@@ -5,7 +5,7 @@ from dataclasses import asdict, dataclass
 from backend.app.simulator import ToolExecutor
 
 
-SENSITIVE_TOOLS = {"read_private_note"}
+SENSITIVE_TOOLS = {"read_private_note", "send_message"}
 UNTRUSTED_SOURCES = {"untrusted_content"}
 
 
