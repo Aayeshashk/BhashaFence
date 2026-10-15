@@ -25,6 +25,8 @@ env/
 # Generated datasets and artifacts
 dataset/raw/*
 dataset/processed/*
+!dataset/processed/multilingual/
+!dataset/processed/multilingual/scenarios.json
 artifacts/*
 !dataset/raw/.gitkeep
 !dataset/processed/.gitkeep
