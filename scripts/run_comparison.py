@@ -88,7 +88,7 @@ SCENARIOS = (
         "Attempt to read a missing private note",
         "read_private_note",
         {"note_id": "missing"},
-        "untrusted_content",
+        "user",
         False,
     ),
     Scenario(

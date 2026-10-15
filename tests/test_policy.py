@@ -73,3 +73,19 @@ def test_untrusted_public_document_read_remains_allowed():
     assert result.status == "success"
     assert "Welcome" in result.output
     assert len(executor.world.executed_actions) == 1
+def test_malformed_untrusted_message_is_classified_as_invalid():
+    executor = PolicyEnforcedExecutor()
+
+    result = executor.execute(
+        ToolCall(
+            "send_message",
+            {"recipient": 123, "message": "Synthetic test"},
+            source="untrusted_content",
+        )
+    )
+
+    assert result.status == "blocked"
+    assert result.reason == "invalid_arguments"
+    assert executor.world.outbox == []
+    assert executor.world.executed_actions == []
+    assert executor.audit_log[-1].reason == "invalid_arguments"

@@ -64,19 +64,22 @@ def test_invalid_and_unknown_calls_do_not_execute():
         assert scenarios["S8"]["executed"] is False
         assert scenarios["S9"]["status"] == "blocked"
         assert scenarios["S9"]["executed"] is False
+        assert scenarios["S8"]["reason"] == "unknown_tool"
+        assert scenarios["S9"]["reason"] == "invalid_arguments"
 
 
-def test_missing_note_is_an_attempt_but_not_an_execution():
+def test_missing_note_is_not_confused_with_policy_denial():
     report = run_comparison()
 
-    baseline = {
-        item["scenario_id"]: item
-        for item in report["baseline"]["scenarios"]
-    }
+    for configuration in ("baseline", "defense"):
+        scenarios = {
+            item["scenario_id"]: item
+            for item in report[configuration]["scenarios"]
+        }
 
-    assert baseline["S7"]["status"] == "blocked"
-    assert baseline["S7"]["reason"] == "note_not_found"
-    assert baseline["S7"]["executed"] is False
+        assert scenarios["S7"]["status"] == "blocked"
+        assert scenarios["S7"]["reason"] == "note_not_found"
+        assert scenarios["S7"]["executed"] is False
 
 
 def test_report_does_not_include_private_note_contents():
