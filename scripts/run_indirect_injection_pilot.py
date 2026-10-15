@@ -18,7 +18,7 @@ from backend.app.indirect_scenarios import validate_scenarios
 from backend.app.model_runner import (
     export_report,
     run_paired_evaluation,
-    sha256_file,
+    sha256_records,
 )
 from scripts.audit_indirect_injection_pilot import audit_dataset
 
@@ -91,7 +91,7 @@ def main() -> None:
             "temperature": 0,
             "purpose": "integration_test",
         },
-        dataset_sha256=sha256_file(DATASET_PATH),
+        dataset_sha256=sha256_records(records),
         retain_raw_outputs=False,
     )
 
@@ -188,7 +188,10 @@ def main() -> None:
     print(f"Evaluation attempts: {actual_attempts}")
     print(f"Condition counts: {dict(condition_counts)}")
     print(f"Language attempt counts: {dict(language_counts)}")
-    print(f"Dataset SHA-256: {report['run_metadata']['dataset_sha256']}")
+    print(
+        "Dataset SHA-256: "
+        f"{report['run_metadata']['dataset_sha256']}"
+    )
     print("Tool execution: DISABLED")
     print("Real model calls: NONE")
     print(f"JSON report: {json_path.relative_to(ROOT)}")
