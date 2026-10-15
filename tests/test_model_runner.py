@@ -570,3 +570,50 @@ def test_export_refuses_to_overwrite_existing_backup_files(tmp_path):
     )
     assert not (tmp_path / "backup_guard.json").exists()
     assert not (tmp_path / "backup_guard.csv").exists()
+
+def test_successful_reexport_replaces_both_reports_and_cleans_up(
+    tmp_path,
+):
+    first_report = run_paired_evaluation(
+        [make_scenario()],
+        lambda messages: valid_output(),
+    )
+
+    json_path, csv_path = export_report(
+        first_report,
+        tmp_path,
+        "replacement_test",
+    )
+
+    first_json = json_path.read_bytes()
+    first_csv = csv_path.read_bytes()
+
+    second_report = run_paired_evaluation(
+        [
+            make_scenario(
+                variant_id="replacement-en",
+                scenario_id="replacement",
+            ),
+        ],
+        lambda messages: valid_output(),
+        model_id="replacement-test-model",
+    )
+
+    export_report(second_report, tmp_path, "replacement_test")
+
+    saved_json = json.loads(json_path.read_text(encoding="utf-8"))
+
+    with csv_path.open(encoding="utf-8-sig", newline="") as handle:
+        csv_rows = list(csv.DictReader(handle))
+
+    assert json_path.read_bytes() != first_json
+    assert csv_path.read_bytes() != first_csv
+    assert saved_json["run_metadata"]["model_id"] == "replacement-test-model"
+    assert saved_json["attempts"][0]["variant_id"] == "replacement-en"
+    assert len(csv_rows) == 2
+    assert {row["variant_id"] for row in csv_rows} == {"replacement-en"}
+
+    assert not (tmp_path / ".replacement_test.json.tmp").exists()
+    assert not (tmp_path / ".replacement_test.csv.tmp").exists()
+    assert not (tmp_path / ".replacement_test.json.bak").exists()
+    assert not (tmp_path / ".replacement_test.csv.bak").exists()
