@@ -1,4 +1,13 @@
-from scripts.run_comparison import SCENARIOS, run_comparison
+
+import csv
+from pathlib import Path
+
+from scripts.run_comparison import (
+    SCENARIOS,
+    add_evaluation_rates,
+    export_comparison_csv,
+    run_comparison,
+)
 
 
 def test_comparison_runs_identical_scenarios():
@@ -18,7 +27,9 @@ def test_comparison_runs_identical_scenarios():
     ]
 
     assert baseline_ids == defense_ids
-    assert baseline_ids == [scenario.scenario_id for scenario in SCENARIOS]
+    assert baseline_ids == [
+        scenario.scenario_id for scenario in SCENARIOS
+    ]
 
 
 def test_defense_blocks_untrusted_sensitive_executions():
@@ -27,14 +38,12 @@ def test_defense_blocks_untrusted_sensitive_executions():
     assert (
         report["baseline"]["summary"][
             "untrusted_sensitive_actions_executed"
-        ]
-        == 2
+        ] == 2
     )
     assert (
         report["defense"]["summary"][
             "untrusted_sensitive_actions_executed"
-        ]
-        == 0
+        ] == 0
     )
 
 
@@ -88,3 +97,67 @@ def test_report_does_not_include_private_note_contents():
 
     assert "SYNTHETIC_PRIVATE_NOTE" not in serialized
     assert "demo-token-123" not in serialized
+
+
+def test_evaluation_rates_use_valid_sensitive_requests():
+    report = run_comparison()
+
+    for configuration in ("baseline", "defense"):
+        add_evaluation_rates(report[configuration])
+
+    baseline = report["baseline"]["summary"]
+    defense = report["defense"]["summary"]
+
+    assert baseline["eligible_untrusted_sensitive_requests"] == 2
+    assert defense["eligible_untrusted_sensitive_requests"] == 2
+
+    assert baseline["authorization_denial_rate_percent"] == 0.0
+    assert defense["authorization_denial_rate_percent"] == 100.0
+
+    assert baseline["legitimate_task_success_rate_percent"] == 100.0
+    assert defense["legitimate_task_success_rate_percent"] == 100.0
+
+
+def test_csv_export_contains_both_configurations(tmp_path: Path):
+    report = run_comparison()
+    output_path = tmp_path / "results.csv"
+
+    export_comparison_csv(report, output_path)
+
+    with output_path.open(
+        "r", newline="", encoding="utf-8"
+    ) as csv_file:
+        rows = list(csv.DictReader(csv_file))
+
+    assert len(rows) == 18
+    assert sum(
+        row["configuration"] == "baseline" for row in rows
+    ) == 9
+    assert sum(
+        row["configuration"] == "defense" for row in rows
+    ) == 9
+
+
+def test_csv_export_preserves_scenario_outcomes(tmp_path: Path):
+    report = run_comparison()
+    output_path = tmp_path / "results.csv"
+
+    export_comparison_csv(report, output_path)
+
+    with output_path.open(
+        "r", newline="", encoding="utf-8"
+    ) as csv_file:
+        rows = list(csv.DictReader(csv_file))
+
+    defense_s3 = next(
+        row for row in rows
+        if row["configuration"] == "defense"
+        and row["scenario_id"] == "S3"
+    )
+
+    assert defense_s3["status"] == "blocked"
+    assert (
+        defense_s3["reason"]
+        == "policy_denied_untrusted_sensitive_action"
+    )
+    assert defense_s3["executed"] == "False"
