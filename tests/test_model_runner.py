@@ -480,3 +480,13 @@ def test_export_preserves_attempt_mapping_when_model_call_fails(tmp_path):
     assert failed["condition"] == "defense"
     assert failed["call_error"] is True
     assert failed["executed"] is False
+def test_export_rejects_non_json_serializable_report(tmp_path):
+    report = {
+        "attempts": [],
+        "unsupported_value": object(),
+    }
+
+    with pytest.raises(TypeError):
+        export_report(report, tmp_path, "invalid_report")
+
+    assert not (tmp_path / "invalid_report.json").exists()
