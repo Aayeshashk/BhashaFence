@@ -617,3 +617,103 @@ def test_successful_reexport_replaces_both_reports_and_cleans_up(
     assert not (tmp_path / ".replacement_test.csv.tmp").exists()
     assert not (tmp_path / ".replacement_test.json.bak").exists()
     assert not (tmp_path / ".replacement_test.csv.bak").exists()
+
+def test_export_restores_json_when_csv_backup_fails(
+    tmp_path,
+    monkeypatch,
+):
+    report = run_paired_evaluation(
+        [make_scenario()],
+        lambda messages: valid_output(),
+    )
+    json_path, csv_path = export_report(
+        report,
+        tmp_path,
+        "backup_failure",
+    )
+
+    original_json = json_path.read_bytes()
+    original_csv = csv_path.read_bytes()
+    original_replace = Path.replace
+
+    def failing_csv_backup(self, target):
+        target_path = Path(target)
+        if (
+            self == csv_path
+            and target_path.name == ".backup_failure.csv.bak"
+        ):
+            raise OSError("simulated CSV backup failure")
+        return original_replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", failing_csv_backup)
+
+    with pytest.raises(OSError, match="CSV backup failure"):
+        export_report(report, tmp_path, "backup_failure")
+
+    assert json_path.exists()
+    assert csv_path.exists()
+    assert json_path.read_bytes() == original_json
+    assert csv_path.read_bytes() == original_csv
+    assert not (tmp_path / ".backup_failure.json.bak").exists()
+    assert not (tmp_path / ".backup_failure.csv.bak").exists()
+
+
+def test_export_preserves_backup_if_restore_fails(
+    tmp_path,
+    monkeypatch,
+):
+    report = run_paired_evaluation(
+        [make_scenario()],
+        lambda messages: valid_output(),
+    )
+    json_path, csv_path = export_report(
+        report,
+        tmp_path,
+        "restore_failure",
+    )
+
+    original_json = json_path.read_bytes()
+    original_csv = csv_path.read_bytes()
+    original_replace = Path.replace
+    csv_publish_failed = False
+
+    def failing_publish_and_restore(self, target):
+        nonlocal csv_publish_failed
+        target_path = Path(target)
+
+        if (
+            self.name == ".restore_failure.csv.tmp"
+            and target_path == csv_path
+        ):
+            csv_publish_failed = True
+            raise OSError("simulated CSV publish failure")
+
+        if (
+            self.name == ".restore_failure.json.bak"
+            and target_path == json_path
+            and csv_publish_failed
+        ):
+            raise OSError("simulated JSON restore failure")
+
+        return original_replace(self, target)
+
+    monkeypatch.setattr(
+        Path,
+        "replace",
+        failing_publish_and_restore,
+    )
+
+    with pytest.raises(OSError):
+        export_report(report, tmp_path, "restore_failure")
+
+    # A failed restoration must not destroy the only backup.
+    assert (
+        tmp_path / ".restore_failure.json.bak"
+    ).exists()
+    assert (
+        tmp_path / ".restore_failure.json.bak"
+    ).read_bytes() == original_json
+
+    # The untouched CSV must remain available.
+    assert csv_path.exists()
+    assert csv_path.read_bytes() == original_csv

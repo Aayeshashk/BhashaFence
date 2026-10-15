@@ -1,4 +1,3 @@
-
 """Paired baseline-versus-defense model evaluation runner.
 
 Proposed actions are data only. This module never executes tools or makes
@@ -197,12 +196,13 @@ def run_paired_evaluation(
 
 
 
+
 def export_report(
     report: dict[str, Any],
     output_dir: str | Path,
     run_name: str = "paired_evaluation",
 ) -> tuple[Path, Path]:
-    """Write a JSON report and CSV without losing previous exports on failure."""
+    """Write JSON and CSV reports while preserving recoverable backups."""
     safe_name = _safe_run_name(run_name)
     destination = Path(output_dir)
     destination.mkdir(parents=True, exist_ok=True)
@@ -213,6 +213,7 @@ def export_report(
     csv_temp = destination / f".{safe_name}.csv.tmp"
     json_backup = destination / f".{safe_name}.json.bak"
     csv_backup = destination / f".{safe_name}.csv.bak"
+
     # Never overwrite recovery files from an interrupted export.
     if json_backup.exists() or csv_backup.exists():
         raise FileExistsError(
@@ -237,15 +238,8 @@ def export_report(
         "raw_output",
     ]
 
-    paths = (
-        json_temp,
-        csv_temp,
-        json_backup,
-        csv_backup,
-    )
-
+    # Prepare both new reports before touching existing reports.
     try:
-        # Prepare both new files before touching existing reports.
         json_temp.write_text(
             json.dumps(
                 report,
@@ -268,39 +262,103 @@ def export_report(
             )
             writer.writeheader()
             writer.writerows(report.get("attempts", []))
-
-        # Back up existing reports so failures can restore them.
-        if json_path.exists():
-            json_path.replace(json_backup)
-        if csv_path.exists():
-            csv_path.replace(csv_backup)
-
-        try:
-            json_temp.replace(json_path)
-            csv_temp.replace(csv_path)
-        except Exception:
-            # Remove any newly published files.
-            json_path.unlink(missing_ok=True)
-            csv_path.unlink(missing_ok=True)
-
-            # Restore previous successful files.
-            if json_backup.exists():
-                json_backup.replace(json_path)
-            if csv_backup.exists():
-                csv_backup.replace(csv_path)
-            raise
-
-        # Publishing succeeded; remove old backups.
-        json_backup.unlink(missing_ok=True)
-        csv_backup.unlink(missing_ok=True)
-
     except Exception:
-        # Clean up temporary files without deleting existing final reports.
-        for path in paths:
+        # These are staging files only; existing reports remain untouched.
+        for temp_path in (json_temp, csv_temp):
             try:
-                path.unlink(missing_ok=True)
+                temp_path.unlink(missing_ok=True)
             except OSError:
                 pass
         raise
+
+    # Move existing reports to recovery files one at a time.
+    # If either move fails, restore any earlier move before raising.
+    try:
+        if json_path.exists():
+            json_path.replace(json_backup)
+
+        if csv_path.exists():
+            csv_path.replace(csv_backup)
+    except Exception as backup_error:
+        restoration_errors = []
+
+        for backup_path, final_path in (
+            (json_backup, json_path),
+            (csv_backup, csv_path),
+        ):
+            if backup_path.exists() and not final_path.exists():
+                try:
+                    backup_path.replace(final_path)
+                except OSError as exc:
+                    restoration_errors.append(
+                        f"{backup_path.name}: {type(exc).__name__}"
+                    )
+
+        for temp_path in (json_temp, csv_temp):
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+        if restoration_errors:
+            raise OSError(
+                "Report backup failed and restoration was incomplete; "
+                "preserve remaining .bak files for recovery. "
+                + "; ".join(restoration_errors)
+            ) from backup_error
+
+        raise
+
+    # Publish both new reports. On failure, remove only the new files
+    # and restore backups without deleting any backup that fails to restore.
+    try:
+        json_temp.replace(json_path)
+        csv_temp.replace(csv_path)
+    except Exception as publish_error:
+        restoration_errors = []
+
+        for final_path in (json_path, csv_path):
+            try:
+                final_path.unlink(missing_ok=True)
+            except OSError as exc:
+                restoration_errors.append(
+                    f"could not remove {final_path.name}: "
+                    f"{type(exc).__name__}"
+                )
+
+        for backup_path, final_path in (
+            (json_backup, json_path),
+            (csv_backup, csv_path),
+        ):
+            if backup_path.exists():
+                try:
+                    backup_path.replace(final_path)
+                except OSError as exc:
+                    restoration_errors.append(
+                        f"{backup_path.name}: {type(exc).__name__}"
+                    )
+
+        for temp_path in (json_temp, csv_temp):
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+        if restoration_errors:
+            raise OSError(
+                "Report publication failed and recovery was incomplete; "
+                "preserve remaining .bak files for recovery. "
+                + "; ".join(restoration_errors)
+            ) from publish_error
+
+        raise
+
+    # Publication succeeded. Cleanup failure must not invalidate the
+    # successfully written reports; any leftover backup blocks future runs.
+    for backup_path in (json_backup, csv_backup):
+        try:
+            backup_path.unlink(missing_ok=True)
+        except OSError:
+            pass
 
     return json_path, csv_path
