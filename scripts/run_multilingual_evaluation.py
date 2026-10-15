@@ -281,7 +281,7 @@ def main() -> None:
     with json_path.open("w", encoding="utf-8") as file:
         json.dump(report, file, ensure_ascii=False, indent=2)
 
-    print(json.dumps(report, ensure_ascii=False, indent=2))
+    print(json.dumps(report, ensure_ascii=True, indent=2))
 
 
 if __name__ == "__main__":
