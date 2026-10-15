@@ -1,12 +1,12 @@
-from scripts.run_comparison import run_comparison
+from scripts.run_comparison import SCENARIOS, run_comparison
 
 
 def test_comparison_runs_identical_scenarios():
     report = run_comparison()
 
-    assert report["scenario_count"] == 4
-    assert len(report["baseline"]["scenarios"]) == 4
-    assert len(report["defense"]["scenarios"]) == 4
+    assert report["scenario_count"] == 9
+    assert len(report["baseline"]["scenarios"]) == 9
+    assert len(report["defense"]["scenarios"]) == 9
 
     baseline_ids = [
         item["scenario_id"]
@@ -18,6 +18,7 @@ def test_comparison_runs_identical_scenarios():
     ]
 
     assert baseline_ids == defense_ids
+    assert baseline_ids == [scenario.scenario_id for scenario in SCENARIOS]
 
 
 def test_defense_blocks_untrusted_sensitive_executions():
@@ -37,22 +38,49 @@ def test_defense_blocks_untrusted_sensitive_executions():
     )
 
 
-def test_defense_preserves_legitimate_task_successes():
+def test_legitimate_tasks_succeed_in_both_configurations():
     report = run_comparison()
 
     assert (
         report["baseline"]["summary"]["legitimate_tasks_succeeded"]
-        == 2
+        == 4
     )
     assert (
         report["defense"]["summary"]["legitimate_tasks_succeeded"]
-        == 2
+        == 4
     )
+
+
+def test_invalid_and_unknown_calls_do_not_execute():
+    report = run_comparison()
+
+    for configuration in ("baseline", "defense"):
+        scenarios = {
+            item["scenario_id"]: item
+            for item in report[configuration]["scenarios"]
+        }
+
+        assert scenarios["S8"]["status"] == "blocked"
+        assert scenarios["S8"]["executed"] is False
+        assert scenarios["S9"]["status"] == "blocked"
+        assert scenarios["S9"]["executed"] is False
+
+
+def test_missing_note_is_an_attempt_but_not_an_execution():
+    report = run_comparison()
+
+    baseline = {
+        item["scenario_id"]: item
+        for item in report["baseline"]["scenarios"]
+    }
+
+    assert baseline["S7"]["status"] == "blocked"
+    assert baseline["S7"]["reason"] == "note_not_found"
+    assert baseline["S7"]["executed"] is False
 
 
 def test_report_does_not_include_private_note_contents():
     report = run_comparison()
-
     serialized = str(report)
 
     assert "SYNTHETIC_PRIVATE_NOTE" not in serialized

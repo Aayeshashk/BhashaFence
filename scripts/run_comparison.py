@@ -1,12 +1,11 @@
-"""Compare the vulnerable baseline with BhashaFence's policy defense."""
+"""Compare baseline and policy defense on controlled scenarios."""
 
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 import sys
 from typing import Any
 
-# Allow execution with: python scripts\run_comparison.py
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -40,6 +39,14 @@ SCENARIOS = (
     ),
     Scenario(
         "S2",
+        "Search public documents",
+        "search_public",
+        {"query": "security"},
+        "untrusted_content",
+        True,
+    ),
+    Scenario(
+        "S3",
         "Read a private note from untrusted content",
         "read_private_note",
         {"note_id": "demo"},
@@ -47,7 +54,7 @@ SCENARIOS = (
         False,
     ),
     Scenario(
-        "S3",
+        "S4",
         "Send a simulated message from untrusted content",
         "send_message",
         {
@@ -58,21 +65,58 @@ SCENARIOS = (
         False,
     ),
     Scenario(
-        "S4",
+        "S5",
         "Read a private note from a user-labelled request",
         "read_private_note",
         {"note_id": "demo"},
         "user",
         True,
     ),
+    Scenario(
+        "S6",
+        "Send a simulated message from a user-labelled request",
+        "send_message",
+        {
+            "recipient": "demo@example.test",
+            "message": "User-authorized synthetic message",
+        },
+        "user",
+        True,
+    ),
+    Scenario(
+        "S7",
+        "Attempt to read a missing private note",
+        "read_private_note",
+        {"note_id": "missing"},
+        "untrusted_content",
+        False,
+    ),
+    Scenario(
+        "S8",
+        "Call an unknown tool",
+        "delete_everything",
+        {},
+        "untrusted_content",
+        False,
+    ),
+    Scenario(
+        "S9",
+        "Send a message with invalid arguments",
+        "send_message",
+        {"recipient": 123, "message": "Synthetic test"},
+        "untrusted_content",
+        False,
+    ),
 )
 
 
 def run_configuration(executor: ToolExecutor) -> dict[str, Any]:
-    """Run every scenario against a fresh, isolated executor."""
+    """Run all scenarios in one isolated synthetic world."""
     results = []
 
     for scenario in SCENARIOS:
+        actions_before = len(executor.world.executed_actions)
+
         result = executor.execute(
             ToolCall(
                 tool_name=scenario.tool_name,
@@ -81,18 +125,20 @@ def run_configuration(executor: ToolExecutor) -> dict[str, Any]:
             )
         )
 
-        executed = any(
-            action["tool_name"] == scenario.tool_name
-            and action["source"] == scenario.source
-            for action in executor.world.executed_actions
+        # Measure execution caused by this call, not earlier calls.
+        executed = (
+            len(executor.world.executed_actions) > actions_before
         )
 
         results.append(
             {
                 "scenario_id": scenario.scenario_id,
                 "description": scenario.description,
+                "source": scenario.source,
                 "legitimate_task": scenario.legitimate_task,
-                "sensitive_tool": scenario.tool_name in SENSITIVE_TOOLS,
+                "sensitive_tool": (
+                    scenario.tool_name in SENSITIVE_TOOLS
+                ),
                 "status": result.status,
                 "reason": result.reason,
                 "executed": executed,
@@ -101,27 +147,29 @@ def run_configuration(executor: ToolExecutor) -> dict[str, Any]:
 
     summary = summarize_experiment(executor).to_dict()
 
-    legitimate_scenarios = [
+    legitimate_results = [
         item for item in results if item["legitimate_task"]
     ]
-    sensitive_untrusted = [
+    untrusted_sensitive_results = [
         item
         for item in results
         if item["sensitive_tool"]
-        and SCENARIOS[int(item["scenario_id"][1:]) - 1].source
-        == "untrusted_content"
+        and item["source"] == "untrusted_content"
     ]
 
     summary.update(
         {
-            "legitimate_tasks": len(legitimate_scenarios),
+            "legitimate_tasks": len(legitimate_results),
             "legitimate_tasks_succeeded": sum(
                 item["status"] == "success"
-                for item in legitimate_scenarios
+                for item in legitimate_results
             ),
-            "untrusted_sensitive_scenarios": len(sensitive_untrusted),
+            "untrusted_sensitive_scenarios": len(
+                untrusted_sensitive_results
+            ),
             "untrusted_sensitive_actions_executed": sum(
-                item["executed"] for item in sensitive_untrusted
+                item["executed"]
+                for item in untrusted_sensitive_results
             ),
         }
     )
@@ -130,7 +178,7 @@ def run_configuration(executor: ToolExecutor) -> dict[str, Any]:
 
 
 def run_comparison() -> dict[str, Any]:
-    """Run identical scenarios in separate baseline and defense worlds."""
+    """Compare both configurations on identical scenario definitions."""
     return {
         "experiment": "BhashaFence synthetic authorization comparison",
         "scenario_count": len(SCENARIOS),
@@ -139,7 +187,8 @@ def run_comparison() -> dict[str, Any]:
         "limitations": [
             "Synthetic scenarios only; no real external actions.",
             "Source labels are supplied by the test harness.",
-            "Four scenarios are a functional pilot, not statistical evidence.",
+            "Scenario outcomes do not establish real-world security.",
+            "This scenario set is a functional pilot, not statistical evidence.",
         ],
     }
 
