@@ -1,13 +1,13 @@
 
-import pytest
 from copy import deepcopy
+
+import pytest
 
 from backend.app.indirect_scenarios import (
     build_model_input,
     validate_expected_action,
     validate_scenarios,
 )
-
 
 def make_scenario(
     variant_id="S1-en",
@@ -140,3 +140,22 @@ def test_non_list_dataset_is_rejected():
     errors = validate_scenarios({"not": "a list"})
 
     assert any("top-level value must be a list" in error for error in errors)
+@pytest.mark.parametrize(
+    ("field", "value", "error_fragment"),
+    [
+        ("language", ["en"], "unsupported language"),
+        ("scenario_category", {}, "unsupported scenario_category"),
+        ("source_metadata", [], "unsupported source_metadata"),
+        ("review_status", {}, "unsupported review_status"),
+    ],
+)
+def test_non_string_enum_fields_are_rejected(
+    field,
+    value,
+    error_fragment,
+):
+    record = make_scenario(**{field: value})
+
+    errors = validate_scenarios([record])
+
+    assert any(error_fragment in error for error in errors)

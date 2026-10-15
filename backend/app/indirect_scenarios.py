@@ -1,4 +1,3 @@
-```python
 """Validation helpers for the separate indirect-injection pilot.
 
 No model calls, external services, or tool execution occur here.
@@ -283,4 +282,3 @@ def build_model_input(record: dict[str, Any]) -> dict[str, str]:
         "user_task": record["user_task"],
         "untrusted_content": record["untrusted_content"],
     }
-```
