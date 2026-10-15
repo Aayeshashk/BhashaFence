@@ -552,3 +552,21 @@ def test_export_failure_preserves_previous_successful_report(
     assert csv_path.read_bytes() == original_csv
     assert not (tmp_path / ".preserve_existing.json.tmp").exists()
     assert not (tmp_path / ".preserve_existing.csv.tmp").exists()
+
+def test_export_refuses_to_overwrite_existing_backup_files(tmp_path):
+    report = run_paired_evaluation(
+        [make_scenario()],
+        lambda messages: valid_output(),
+    )
+
+    json_backup = tmp_path / ".backup_guard.json.bak"
+    json_backup.write_text("preserve this recovery file", encoding="utf-8")
+
+    with pytest.raises(FileExistsError, match="backup already exists"):
+        export_report(report, tmp_path, "backup_guard")
+
+    assert json_backup.read_text(encoding="utf-8") == (
+        "preserve this recovery file"
+    )
+    assert not (tmp_path / "backup_guard.json").exists()
+    assert not (tmp_path / "backup_guard.csv").exists()

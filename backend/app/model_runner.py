@@ -213,6 +213,11 @@ def export_report(
     csv_temp = destination / f".{safe_name}.csv.tmp"
     json_backup = destination / f".{safe_name}.json.bak"
     csv_backup = destination / f".{safe_name}.csv.bak"
+    # Never overwrite recovery files from an interrupted export.
+    if json_backup.exists() or csv_backup.exists():
+        raise FileExistsError(
+            "An export backup already exists. Inspect it before retrying."
+        )
 
     columns = [
         "variant_id",
