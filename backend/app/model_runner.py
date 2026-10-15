@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from backend.app.indirect_scenarios import validate_scenarios
 from backend.app.model_evaluation import build_messages
 from backend.app.model_scoring import aggregate_results, score_attempt
 
@@ -52,12 +53,15 @@ def run_paired_evaluation(
     dataset_sha256: str | None = None,
     retain_raw_outputs: bool = False,
 ) -> dict[str, Any]:
-    """Evaluate each scenario under baseline and defense conditions."""
+    """Evaluate each valid scenario under baseline and defense conditions."""
+
+    # Validate metadata before starting the evaluation.
     if not isinstance(model_id, str) or not model_id.strip():
         raise ValueError("model_id must be a non-empty string.")
 
-    if dataset_sha256 is not None and not re.fullmatch(
-        r"[0-9a-fA-F]{64}", dataset_sha256
+    if dataset_sha256 is not None and (
+        not isinstance(dataset_sha256, str)
+        or not re.fullmatch(r"[0-9a-fA-F]{64}", dataset_sha256)
     ):
         raise ValueError(
             "dataset_sha256 must be a 64-character SHA-256 hex digest."
@@ -71,9 +75,21 @@ def run_paired_evaluation(
                 "model_config must be JSON serializable."
             ) from exc
 
+    # Validate the complete dataset before calling the model.
+    # This prevents malformed scenarios and duplicate variant IDs from
+    # entering the experiment.
+    validation_errors = validate_scenarios(records)
+
+    if validation_errors:
+        raise ValueError(
+            "Invalid scenario records: "
+            + "; ".join(validation_errors)
+        )
+
     attempts: list[dict[str, Any]] = []
     callable_errors = 0
 
+    # Each validated scenario is evaluated under both conditions.
     for record in records:
         for condition in CONDITIONS:
             # Scenario preparation errors are not provider errors.
@@ -105,7 +121,6 @@ def run_paired_evaluation(
 
                 attempts.append(result)
                 continue
-
 
             result = score_attempt(record, condition, raw_output)
             result["call_error"] = False

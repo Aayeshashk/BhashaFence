@@ -308,3 +308,46 @@ def test_malformed_response_is_not_counted_as_provider_error():
         and group["invalid_outputs"] == 1
         for group in report["aggregate"]["groups"].values()
     )
+
+def test_each_scenario_gets_exactly_one_attempt_per_condition():
+    records = [
+        make_scenario(variant_id="S1-en"),
+        make_scenario(
+            variant_id="S2-en",
+            scenario_id="S2",
+        ),
+    ]
+
+    report = run_paired_evaluation(
+        records,
+        lambda messages: valid_output(),
+    )
+
+    attempts = report["attempts"]
+
+    assert len(attempts) == len(records) * 2
+
+    for record in records:
+        matching = [
+            attempt for attempt in attempts
+            if attempt["variant_id"] == record["variant_id"]
+        ]
+
+        assert [item["condition"] for item in matching] == [
+            "baseline",
+            "defense",
+        ]
+
+
+def test_runner_rejects_duplicate_variant_ids():
+    record = make_scenario(variant_id="duplicate")
+    duplicate = make_scenario(
+        variant_id="duplicate",
+        scenario_id="S2",
+    )
+
+    with pytest.raises(ValueError):
+        run_paired_evaluation(
+            [record, duplicate],
+            lambda messages: valid_output(),
+        )
