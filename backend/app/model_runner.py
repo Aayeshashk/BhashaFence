@@ -1,8 +1,8 @@
 
 """Paired baseline-versus-defense model evaluation runner.
 
-Proposed actions are recorded as data only. This module never executes tools
-and makes no provider SDK or network calls by itself.
+Proposed actions are data only. This module never executes tools or makes
+provider SDK or network calls by itself.
 """
 
 import csv
@@ -32,7 +32,7 @@ def sha256_file(path: str | Path) -> str:
 
 
 def _safe_run_name(run_name: str) -> str:
-    """Reject unsafe report names and path traversal."""
+    """Reject unsafe report names."""
     if not isinstance(run_name, str) or not re.fullmatch(
         r"[A-Za-z0-9][A-Za-z0-9_.-]{0,79}", run_name
     ):
@@ -52,12 +52,7 @@ def run_paired_evaluation(
     dataset_sha256: str | None = None,
     retain_raw_outputs: bool = False,
 ) -> dict[str, Any]:
-    """Evaluate each scenario under baseline and defense conditions.
-
-    Proposed actions are scored as data and never executed.
-    Provider exception messages are not stored.
-    Raw model outputs are omitted unless explicitly requested.
-    """
+    """Evaluate each scenario under baseline and defense conditions."""
     if not isinstance(model_id, str) or not model_id.strip():
         raise ValueError("model_id must be a non-empty string.")
 
@@ -81,23 +76,36 @@ def run_paired_evaluation(
 
     for record in records:
         for condition in CONDITIONS:
+            # Scenario preparation errors are not provider errors.
+            messages = build_messages(record, condition)
+
             try:
-                messages = build_messages(record, condition)
                 raw_output = model_callable(messages)
 
             except Exception as exc:
                 callable_errors += 1
+
                 result = score_attempt(record, condition, None)
+
+                # A provider failure is not a malformed model response.
+                result["call_error"] = True
+                result["output_valid"] = False
+                result["invalid_output"] = False
+                result["sensitive_action_attempt"] = False
+                result["expected_action_match"] = None
+                result["task_completion_self_report"] = None
+                result["needs_clarification"] = None
+                result["executed"] = False
                 result["error"] = (
                     f"Model callable failed: {type(exc).__name__}"
                 )
-                result["call_error"] = True
 
                 if retain_raw_outputs:
                     result["raw_output"] = None
 
                 attempts.append(result)
                 continue
+
 
             result = score_attempt(record, condition, raw_output)
             result["call_error"] = False
@@ -112,7 +120,7 @@ def run_paired_evaluation(
             attempts.append(result)
 
     return {
-        "report_schema_version": "1.1",
+        "report_schema_version": "1.2",
         "run_metadata": {
             "created_at_utc": datetime.now(timezone.utc).isoformat(),
             "scenario_count": len(records),
@@ -134,10 +142,11 @@ def run_paired_evaluation(
             "Proposed actions are never executed.",
             "Task completion is a model self-report, not verified success.",
             "Invalid outputs and provider failures are not evidence of safe behavior.",
+            "Provider failures are reported separately from invalid outputs.",
             "Sensitive-action rates use valid outputs as their denominator.",
             "Results apply only to the supplied scenarios and model configuration.",
-            "The harness supplies structured scenario fields; this alone does not "
-            "establish natural-language understanding robustness.",
+            "Structured scenario fields alone do not establish natural-language "
+            "understanding robustness.",
             "Pilot records remain draft pending independent linguistic review.",
         ],
         "attempts": attempts,

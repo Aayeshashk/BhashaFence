@@ -171,16 +171,25 @@ def classify_proposal(
     }
 
 
+
 def evaluate_with_callable(
     record: dict[str, Any],
     condition: str,
     model_callable: Callable[[list[dict[str, str]]], str],
+    *,
+    retain_raw_output: bool = False,
 ) -> dict[str, Any]:
-    """Run one model call through an injected provider or test double."""
+    """Evaluate one proposal without executing tools.
+
+    Raw output is omitted unless explicitly requested.
+    """
     messages = build_messages(record, condition)
     raw_output = model_callable(messages)
     parsed = parse_model_output(raw_output)
     result = classify_proposal(parsed, record)
     result["condition"] = condition
-    result["raw_output"] = raw_output
+
+    if retain_raw_output:
+        result["raw_output"] = raw_output
+
     return result

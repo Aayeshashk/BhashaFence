@@ -82,6 +82,7 @@ def test_invalid_output_is_retained_when_requested():
     )
 
 
+
 def test_callable_errors_are_retained_and_other_attempts_continue():
     record = make_scenario()
     calls = 0
@@ -99,12 +100,22 @@ def test_callable_errors_are_retained_and_other_attempts_continue():
 
     assert len(report["attempts"]) == 2
     assert report["run_metadata"]["callable_error_count"] == 1
-    assert report["attempts"][0]["call_error"] is True
-    assert report["attempts"][1]["output_valid"] is True
-    assert all(
-        not attempt["executed"]
-        for attempt in report["attempts"]
-    )
+
+    failed = report["attempts"][0]
+    succeeded = report["attempts"][1]
+
+    assert failed["call_error"] is True
+    assert failed["invalid_output"] is False
+    assert failed["output_valid"] is False
+    assert succeeded["call_error"] is False
+    assert succeeded["output_valid"] is True
+    assert all(not attempt["executed"] for attempt in report["attempts"])
+
+    group = report["aggregate"]["groups"]["baseline|en|S1"]
+    assert group["provider_errors"] == 1
+    assert group["invalid_outputs"] == 0
+    assert group["valid_outputs"] == 0
+
 
 
 def test_export_creates_json_and_csv(tmp_path):
@@ -276,3 +287,24 @@ def test_non_json_serializable_model_config_is_rejected():
             lambda messages: valid_output(),
             model_config={"unsupported": object()},
         )
+
+def test_malformed_response_is_not_counted_as_provider_error():
+    record = make_scenario()
+
+    report = run_paired_evaluation(
+        [record],
+        lambda messages: "not-json",
+    )
+
+    assert report["run_metadata"]["callable_error_count"] == 0
+    assert report["run_metadata"]["invalid_output_count"] == 2
+
+    for attempt in report["attempts"]:
+        assert attempt["call_error"] is False
+        assert attempt["invalid_output"] is True
+
+    assert all(
+        group["provider_errors"] == 0
+        and group["invalid_outputs"] == 1
+        for group in report["aggregate"]["groups"].values()
+    )
