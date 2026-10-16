@@ -1,3 +1,4 @@
+
 """Paired baseline-versus-defense model evaluation runner.
 
 Proposed actions are data only. This module never executes tools or makes
@@ -41,9 +42,7 @@ def sha256_records(records: list[dict[str, Any]]) -> str:
         allow_nan=False,
     )
 
-    return hashlib.sha256(
-        canonical_json.encode("utf-8")
-    ).hexdigest()
+    return hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
 
 
 def _safe_run_name(run_name: str) -> str:
@@ -66,6 +65,7 @@ def run_paired_evaluation(
     model_config: dict[str, Any] | None = None,
     dataset_sha256: str | None = None,
     retain_raw_outputs: bool = False,
+    diagnostic_callback: Callable[[str, str, str], None] | None = None,
 ) -> dict[str, Any]:
     """Evaluate each valid scenario under baseline and defense conditions."""
 
@@ -86,8 +86,7 @@ def run_paired_evaluation(
 
     if validation_errors:
         raise ValueError(
-            "Invalid scenario records: "
-            + "; ".join(validation_errors)
+            "Invalid scenario records: " + "; ".join(validation_errors)
         )
 
     # Hash the exact ordered records that will be evaluated.
@@ -126,6 +125,32 @@ def run_paired_evaluation(
             except Exception as exc:
                 callable_errors += 1
 
+                # Read only sanitized diagnostic attributes. Never store the
+                # original provider exception message, which may contain
+                # sensitive request details.
+                diagnostic_code = getattr(
+                    exc, "diagnostic_code", "UNCLASSIFIED"
+                )
+                provider_exception_type = getattr(
+                    exc, "provider_exception_type", type(exc).__name__
+                )
+
+                # Restrict diagnostic values to simple strings.
+                if not isinstance(diagnostic_code, str):
+                    diagnostic_code = "UNCLASSIFIED"
+
+                if not isinstance(provider_exception_type, str):
+                    provider_exception_type = type(exc).__name__
+
+                # Optional callback receives identifiers and a sanitized
+                # exception class/category pair, never prompts or outputs.
+                if diagnostic_callback is not None:
+                    diagnostic_callback(
+                        str(record.get("variant_id", "unknown")),
+                        condition,
+                        f"{provider_exception_type}:{diagnostic_code}",
+                    )
+
                 result = score_attempt(record, condition, None)
 
                 # A provider failure is not a malformed model response.
@@ -137,8 +162,13 @@ def run_paired_evaluation(
                 result["task_completion_self_report"] = None
                 result["needs_clarification"] = None
                 result["executed"] = False
+
+                # Store safe diagnostic metadata as distinct fields.
+                result["provider_exception_type"] = provider_exception_type
+                result["diagnostic_code"] = diagnostic_code
                 result["error"] = (
-                    f"Model callable failed: {type(exc).__name__}"
+                    f"Model callable failed: {provider_exception_type} "
+                    f"({diagnostic_code})"
                 )
 
                 if retain_raw_outputs:
@@ -149,11 +179,13 @@ def run_paired_evaluation(
 
             result = score_attempt(record, condition, raw_output)
             result["call_error"] = False
+            result["provider_exception_type"] = None
+            result["diagnostic_code"] = None
+            result["error"] = None
 
             if retain_raw_outputs:
                 result["raw_output"] = (
-                    raw_output
-                    if isinstance(raw_output, str)
+                    raw_output if isinstance(raw_output, str)
                     else repr(raw_output)
                 )
 
@@ -194,9 +226,6 @@ def run_paired_evaluation(
     }
 
 
-
-
-
 def export_report(
     report: dict[str, Any],
     output_dir: str | Path,
@@ -226,6 +255,9 @@ def export_report(
         "language",
         "scenario_category",
         "condition",
+        "proposed_tool",
+        "proposed_arguments",
+        "response",
         "output_valid",
         "invalid_output",
         "sensitive_action_attempt",
@@ -235,6 +267,8 @@ def export_report(
         "executed",
         "call_error",
         "error",
+        "provider_exception_type",
+        "diagnostic_code",
         "raw_output",
     ]
 
@@ -262,6 +296,7 @@ def export_report(
             )
             writer.writeheader()
             writer.writerows(report.get("attempts", []))
+
     except Exception:
         # These are staging files only; existing reports remain untouched.
         for temp_path in (json_temp, csv_temp):
@@ -279,6 +314,7 @@ def export_report(
 
         if csv_path.exists():
             csv_path.replace(csv_backup)
+
     except Exception as backup_error:
         restoration_errors = []
 
@@ -314,6 +350,7 @@ def export_report(
     try:
         json_temp.replace(json_path)
         csv_temp.replace(csv_path)
+
     except Exception as publish_error:
         restoration_errors = []
 
@@ -354,7 +391,7 @@ def export_report(
         raise
 
     # Publication succeeded. Cleanup failure must not invalidate the
-    # successfully written reports; any leftover backup blocks future runs.
+    # successfully written reports; leftover backups block future exports.
     for backup_path in (json_backup, csv_backup):
         try:
             backup_path.unlink(missing_ok=True)
